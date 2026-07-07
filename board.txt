@@ -1,0 +1,1 @@
+﻿vm.intellisense.ignore-error-codes=20,2342,351

@@ -1,0 +1,75 @@
+﻿#include "app_emotion.h"
+
+EmotionSystem::EmotionSystem() { Init(); }
+
+void EmotionSystem::Init() {
+    current_emotion = 5;
+    is_full = false;
+    is_sleeping = false;
+    last_update_time = millis();
+    decay_timer_ms = DECAY_INTERVAL_MS;
+    full_timer_ms = 0;
+}
+
+void EmotionSystem::Update() {
+    uint32_t current_time = millis();
+    uint32_t delta_t = current_time - last_update_time;
+    last_update_time = current_time;
+
+    if (is_sleeping) return;
+
+    if (is_full) {
+        full_timer_ms -= delta_t;
+        if (full_timer_ms <= 0) {
+            is_full = false;
+            full_timer_ms = 0;
+        }
+    }
+    else {
+        decay_timer_ms -= delta_t;
+        if (decay_timer_ms <= 0) {
+            decay_timer_ms = DECAY_INTERVAL_MS;
+            if (current_emotion > MIN_EMOTION) current_emotion--;
+        }
+    }
+}
+
+void EmotionSystem::Feed() {
+    is_full = true;
+    full_timer_ms = FULL_DURATION_MS;
+}
+
+void EmotionSystem::Pet() {
+    if (current_emotion < MAX_EMOTION) current_emotion++;
+}
+
+void EmotionSystem::SetSleep(bool sleep_state) {
+    is_sleeping = sleep_state;
+    if (!sleep_state) last_update_time = millis();
+}
+
+void EmotionSystem::SetEmotion(uint8_t val) {
+    if (val >= MIN_EMOTION && val <= MAX_EMOTION) current_emotion = val;
+}
+
+void EmotionSystem::SetFull(bool state) {
+    is_full = state;
+    if (state) full_timer_ms = FULL_DURATION_MS;
+    else full_timer_ms = 0;
+}
+
+uint16_t EmotionSystem::GetFullRemainSeconds() const {
+    return is_full ? (uint16_t)(full_timer_ms / 1000) : 0;
+}
+
+const char* EmotionSystem::GetEmotionKaomoji() const {
+    if (current_emotion >= 8) return "(*^▽^*)";
+    if (current_emotion >= 5) return "(^v^)";
+    if (current_emotion >= 3) return "(´･_･`)";
+    return "(T_T)";
+}
+
+const char* EmotionSystem::GetStateKaomoji() const {
+    if (is_sleeping) return "( -_-)zZ";
+    return is_full ? "( ˘▽˘)c[]" : "( O_O)!!";
+}
