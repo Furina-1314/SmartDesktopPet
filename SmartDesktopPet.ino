@@ -67,17 +67,32 @@ void LoadPetMemory() {
     if (rtc_wasSleeping > 0) {
         prefs_cfg.begin("pet_cfg", true);
         pet_emotion.SetEmotion(prefs_cfg.getUInt("emotion", 5));
-        pet_emotion.SetFull(prefs_cfg.getBool("is_full", false));
+        bool is_full = prefs_cfg.getBool("is_full", false);
+        uint16_t remain = prefs_cfg.getUInt("full_rem", 0); // 【新增】读取剩余秒数
         prefs_cfg.end();
-        LOG_INFO("Restored state from Flash memory.");
+
+        // 【核心修正】拦截默认的 SetFull 行为，采用精准的 Restore 接口
+        if (is_full && remain > 0) {
+            pet_emotion.RestoreFullState(remain);
+        }
+        else {
+            pet_emotion.SetFull(false);
+        }
+        LOG_INFO("Restored state and precise timers from Flash memory.");
     }
 }
 
 void GoToDeepSleep() {
     rtc_bootMs += millis();
+
+    // 掉电前保存即时状态（写入 Flash）
     prefs_cfg.begin("pet_cfg", false);
     prefs_cfg.putUInt("emotion", pet_emotion.GetEmotion());
     prefs_cfg.putBool("is_full", pet_emotion.GetIsFull());
+
+    // 【核心修正】同步将确切的剩余秒数写入 Flash 记忆空间
+    prefs_cfg.putUInt("full_rem", pet_emotion.GetFullRemainSeconds());
+
     prefs_cfg.end();
 
     screen.Sleep();

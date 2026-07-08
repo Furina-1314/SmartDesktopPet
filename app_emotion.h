@@ -32,5 +32,7 @@ public:
     uint16_t GetFullRemainSeconds() const;
     const char* GetEmotionKaomoji() const;
     const char* GetStateKaomoji() const;
+    // 【新增】专用于 Deep-sleep 唤醒后的饱食倒计时精准重载
+    void RestoreFullState(uint16_t remain_sec);
 };
 #endif

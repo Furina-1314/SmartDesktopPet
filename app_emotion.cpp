@@ -73,3 +73,20 @@ const char* EmotionSystem::GetStateKaomoji() const {
     if (is_sleeping) return "( -_-)zZ";
     return is_full ? "( ˘▽˘)c[]" : "( O_O)!!";
 }
+
+void EmotionSystem::RestoreFullState(uint16_t remain_sec) {
+    if (remain_sec > 0) {
+        // 恢复布尔状态与精确定量时间
+        is_full = true;
+        full_timer_ms = remain_sec;
+
+        // 【关键】刷新时间基准锚点
+        // 如果您的类内部有类似 last_update_time 或 full_start_time 的变量用于计算 1 秒流逝，
+        // 请务必在这里将其赋值为 millis()，以防唤醒后发生时间偏移。
+        // 例如：last_update_time = millis(); 
+    }
+    else {
+        is_full = false;
+        full_timer_ms = 0;
+    }
+}
