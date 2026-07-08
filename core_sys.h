@@ -22,6 +22,9 @@ enum PetMotion {
 
 // 严谨的日志输出宏，自动附加系统开机以来的绝对毫秒数
 #define LOG_INFO(msg) Serial.printf("[%lu ms] %s\n", millis(), msg)
-#define LOG_MOTION(motion_id) Serial.printf("[%lu ms] Motion %d\n", millis(), motion_id)
-
+#define LOG_MOTION(motion_id) do { \
+    if ((motion_id) != 0) { \
+        Serial.printf("[%lu ms] Motion+%d\n", millis(), (motion_id)); \
+    } \
+} while(0)
 #endif // __CORE_SYS_H__

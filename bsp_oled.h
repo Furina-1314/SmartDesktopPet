@@ -21,6 +21,13 @@ public:
     void Sleep();
     void Wakeup();
 
+    // 增加形参 float temp_c
+    // 在 bsp_oled.h 的 public 区域中找到该函数声明，并更新为：
+    void UpdateDesktopPetUI(uint8_t emotion, const char* emoKaomoji,
+        bool isFull, uint16_t remainSeconds,
+        const char* stateKaomoji, PetMotion motion,
+        float temp_c, int weather_code); // 【修改点】增加 weather_code
+
     void UpdateDesktopPetUI(
         uint8_t emotion,
         const char* emoKaomoji,

@@ -1,133 +1,86 @@
 ﻿#include "app_motion.h"
-#include <stdlib.h>
 
-void MotionController::Init(uint8_t pin_left, uint8_t pin_right) {
-    pinL = pin_left;
-    pinR = pin_right;
+void MotionController::Init(uint8_t pin_l, uint8_t pin_r) {
+    pinL = pin_l;
+    pinR = pin_r;
     servos.Init(pinL, pinR);
-
     current_motion = MOTION_NULL;
     current_frame = 0;
     last_frame_time = millis();
-    last_idle_time = millis(); // 初始化空闲时间戳
 }
 
-void MotionController::TriggerMotion(PetMotion new_motion) {
-    current_motion = new_motion;
-    current_frame = 0; // 重置帧计数器
-    last_frame_time = millis(); // 刷新时间戳，立即触发第0帧
-    last_idle_time = millis(); // 【新增】动作打断时，重置空闲计时
-    LOG_MOTION(new_motion); // 利用我们在 core_sys.h 定义的宏打印日志
+PetMotion MotionController::GetCurrentMotion() {
+    return current_motion;
 }
 
-void MotionController::UpdateAutonomousBehavior(uint8_t emotion, bool is_sleeping) {
-    // 互斥条件：睡眠中，或正在执行动作时，暂停自动触发逻辑
-    if (is_sleeping || current_motion != MOTION_NULL) {
-        last_idle_time = millis();
-        return;
-    }
+void MotionController::TriggerMotion(PetMotion motion) {
+    current_motion = motion;
+    current_frame = 0;
+    last_frame_time = millis();
+}
 
-    uint32_t current_time = millis();
-    // 严格满足大作业要求：每秒钟 (1000ms) 判定一次
-    if (current_time - last_idle_time >= 1000) {
-        last_idle_time = current_time;
-
-        // 生成 0 到 9999 的随机数，3.33% 的概率等价于数值落在 [0, 332] 区间
-        if (random(0, 10000) < 333) {
-            // 严格遵循阈值判定
-            if (emotion >= 5) {
-                TriggerMotion(MOTION_IDLE); // 心情 >= 5 触发闲逛
-            }
-            else {
-                TriggerMotion(MOTION_TIRE); // 心情 < 5 触发疲惫
-            }
-        }
-    }
+// 【新增核心实现】绝对映射控制律
+void MotionController::ForceSleepPosture() {
+    servos.Attach(pinL, pinR);
+    servos.SetArms(170, 170); // 定量映射：90(中立) + 80(偏移) = 170度
 }
 
 void MotionController::Update(bool is_sleeping) {
-    // 睡眠保护逻辑：立刻切断舵机电源并挂起状态机
-    if (is_sleeping) {
-        servos.Detach();
-        return;
-    }
-    // 清醒时确保舵机在线
-    else {
+    // 剔除旧版假睡眠逻辑，专注于在唤醒态分配时间切片
+    if (!is_sleeping) {
         servos.Attach(pinL, pinR);
+        ExecuteFrame(millis());
     }
-
-    // 执行帧动画逻辑
-    ExecuteFrame(millis());
 }
 
 void MotionController::ExecuteFrame(uint32_t current_time) {
-    // 动作脚本引擎
+    // 保持上一版修改过的半周期 (Half-period) 时间窗离散化逻辑不变
+    // (MOTION_PLAY, MOTION_IDLE, MOTION_TIRE, MOTION_FOWD)
     switch (current_motion) {
-
     case MOTION_NULL:
-        // 空闲状态：回归 90 度并维持
         if (current_frame == 0) {
             servos.SetArms(90, 90);
-            current_frame++; // 进入待机帧
+            current_frame++;
         }
         break;
 
-    case MOTION_PLAY:
-        // 玩耍动作：双手挥舞 3 次 (每 300ms 切换一次方向)
-        if (current_time - last_frame_time >= 300) {
+    case MOTION_PLAY: // 3次，幅度-45°~+45°，持续2秒 (333ms/帧)
+        if (current_time - last_frame_time >= 333) {
             last_frame_time = current_time;
-
-            if (current_frame % 2 == 0) {
-                servos.SetArms(45, 135); // 举起
-            }
-            else {
-                servos.SetArms(135, 45); // 放下
-            }
-
+            if (current_frame % 2 == 0) servos.SetArms(45, 45);
+            else servos.SetArms(135, 135);
             current_frame++;
-            // 挥舞 6 次 (3个来回) 后，动作结束，回归 NULL
-            if (current_frame >= 6) {
-                TriggerMotion(MOTION_NULL);
-            }
+            if (current_frame >= 6) TriggerMotion(MOTION_NULL);
         }
         break;
 
-    case MOTION_TIRE:
-        // 疲惫动作：双手无力下垂
-        if (current_frame == 0) {
-            servos.SetArms(30, 30); // 向下低落
-            current_frame++;
-        }
-        break;
-
-    case MOTION_FOWD:
-        // 前进动作：类似人走路的摆臂，交替挥动
-        if (current_time - last_frame_time >= 500) {
+    case MOTION_IDLE: // 3次，幅度-60°~0°，持续4秒 (666ms/帧)
+        if (current_time - last_frame_time >= 666) {
             last_frame_time = current_time;
-            if (current_frame % 2 == 0) {
-                servos.SetArms(60, 60);
-            }
-            else {
-                servos.SetArms(120, 120);
-            }
+            if (current_frame % 2 == 0) servos.SetArms(30, 30);
+            else servos.SetArms(90, 90);
             current_frame++;
-            if (current_frame >= 4) {
-                TriggerMotion(MOTION_NULL); // 走两步后停止
-            }
+            if (current_frame >= 6) TriggerMotion(MOTION_NULL);
         }
         break;
 
-    case MOTION_IDLE:
-        // 闲逛：随机的小幅度摆动
-        if (current_time - last_frame_time >= 800) {
+    case MOTION_TIRE: // 2次，一侧静止，另一侧30°~50°，持续3秒 (750ms/帧)
+        if (current_time - last_frame_time >= 750) {
             last_frame_time = current_time;
-            int randL = 90 + random(-20, 20);
-            int randR = 90 + random(-20, 20);
-            servos.SetArms(randL, randR);
+            if (current_frame % 2 == 0) servos.SetArms(90, 120);
+            else servos.SetArms(90, 140);
             current_frame++;
-            if (current_frame >= 5) {
-                TriggerMotion(MOTION_NULL);
-            }
+            if (current_frame >= 4) TriggerMotion(MOTION_NULL);
+        }
+        break;
+
+    case MOTION_FOWD: // 3次，幅度-70°~0°，反向摆动，持续4秒 (666ms/帧)
+        if (current_time - last_frame_time >= 666) {
+            last_frame_time = current_time;
+            if (current_frame % 2 == 0) servos.SetArms(20, 90);
+            else servos.SetArms(90, 20);
+            current_frame++;
+            if (current_frame >= 6) TriggerMotion(MOTION_NULL);
         }
         break;
     }

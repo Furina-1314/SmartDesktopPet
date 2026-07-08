@@ -8,29 +8,24 @@
 
 class MotionController {
 private:
-    ServoSystem servos;
-    uint8_t pinL;
-    uint8_t pinR;
-
-    PetMotion current_motion;
-    uint8_t current_frame;
+    uint8_t pinL, pinR;
     uint32_t last_frame_time;
-
-    // 【新增】自主行为计时器变量
-    uint32_t last_idle_time;
-    static const uint32_t AUTO_ACT_INTERVAL_MS = 6000; // 空闲 6 秒后触发自主行为
-
-    void ExecuteFrame(uint32_t current_time);
+    uint8_t current_frame;
 
 public:
-    void Init(uint8_t pin_left, uint8_t pin_right);
-    void TriggerMotion(PetMotion new_motion);
+    ServoSystem servos; // 保证底层接口暴露或直接在类内部操作
+    PetMotion current_motion;
+
+    void Init(uint8_t pin_l, uint8_t pin_r);
     void Update(bool is_sleeping);
+    void TriggerMotion(PetMotion motion);
+    void ExecuteFrame(uint32_t current_time);
+    PetMotion GetCurrentMotion();
 
-    // 【新增】自主行为评估接口
-    void UpdateAutonomousBehavior(uint8_t emotion, bool is_sleeping);
+    // 【新增】强制使舵机移动至 +80° 睡眠物理姿态
+    void ForceSleepPosture();
 
-    PetMotion GetCurrentMotion() const { return current_motion; }
+    // 注：UpdateAutonomousBehavior() 已被废弃，移至 ino 文件的主循环执行严谨定量概率
 };
 
 #endif

@@ -42,6 +42,9 @@
     <ClCompile Include="app_motion.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="app_environment.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="__vm\.Sketch1.vsarduino.h">
@@ -69,6 +72,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="app_motion.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="app_environment.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Downloads\ArduinoJson.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
