@@ -15,7 +15,7 @@ private:
 
     static const int32_t DECAY_INTERVAL_MS = 30000;
     static const int32_t FULL_DURATION_MS = 120000;
-    static const uint8_t MAX_EMOTION = 10;
+    static const uint8_t MAX_EMOTION = 20;
     static const uint8_t MIN_EMOTION = 1;
 
 public:
@@ -34,5 +34,16 @@ public:
     const char* GetStateKaomoji() const;
     // 【新增】专用于 Deep-sleep 唤醒后的饱食倒计时精准重载
     void RestoreFullState(uint16_t remain_sec);
+    // 新增精确时间戳接口
+    int32_t GetFullTimerMs() const { return full_timer_ms; }
+    void SetFullTimerMs(int32_t ms) {
+        full_timer_ms = ms;
+        is_full = (ms > 0);
+    }
+    // 获取/设置当前衰减计时器余量
+    int32_t GetDecayTimerMs() const { return decay_timer_ms; }
+    void SetDecayTimerMs(int32_t ms) {
+        if (ms > 0 && ms <= DECAY_INTERVAL_MS) decay_timer_ms = ms;
+    }
 };
 #endif

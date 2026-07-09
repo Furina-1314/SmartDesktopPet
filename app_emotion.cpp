@@ -63,15 +63,16 @@ uint16_t EmotionSystem::GetFullRemainSeconds() const {
 }
 
 const char* EmotionSystem::GetEmotionKaomoji() const {
-    if (current_emotion >= 8) return "(*^▽^*)";
-    if (current_emotion >= 5) return "(^v^)";
-    if (current_emotion >= 3) return "(´･_･`)";
+    if (current_emotion >= 12) return"(> w <)";
+    if (current_emotion >= 8) return "(*^3^*)";
+    if (current_emotion >= 5) return "( ^ v ^ )";
+    if (current_emotion >= 3) return " ( 0 ^ 0`) ";
     return "(T_T)";
 }
 
 const char* EmotionSystem::GetStateKaomoji() const {
     if (is_sleeping) return "( -_-)zZ";
-    return is_full ? "( ˘▽˘)c[]" : "( O_O)!!";
+    return is_full ? "( ^ O ^)c[]" : "( O_O)!!";
 }
 
 void EmotionSystem::RestoreFullState(uint16_t remain_sec) {

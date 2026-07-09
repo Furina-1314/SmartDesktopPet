@@ -41,7 +41,6 @@ bool system_sleeping = false;
 
 // ==== 提权到全局的时序控制变量（防止唤醒瞬间发生时间跳变） ====
 uint32_t last_pet_time = 0;
-uint32_t last_emo_drop = 0;
 uint32_t last_auto_action = 0;
 uint32_t last_weather_update = 0;
 uint32_t last_print = 0;
@@ -57,7 +56,23 @@ uint32_t GetAbsoluteTimeMs() { return rtc_bootMs + millis(); }
 
 // ==========================================
 // 记忆系统与硬件级待机 (Deep-Sleep)
-// ==========================================
+void GoToDeepSleep() {
+    rtc_bootMs += millis();
+    prefs_cfg.begin("pet_cfg", false);
+    prefs_cfg.putUInt("emotion", pet_emotion.GetEmotion());
+    prefs_cfg.putBool("is_full", pet_emotion.GetIsFull());
+
+    // 固化饱食与心情的精确倒计时
+    prefs_cfg.putInt("full_timer", pet_emotion.GetFullTimerMs());
+    prefs_cfg.putInt("decay_timer", pet_emotion.GetDecayTimerMs());
+    prefs_cfg.end();
+
+    screen.Sleep();
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)ENCODER_KEY_PIN, 0);
+    delay(50); // 确保 Flash 物理写入完成
+    esp_deep_sleep_start();
+}
+
 void LoadPetMemory() {
     prefs_mem.begin("pet_mem", true);
     total_pets = prefs_mem.getUInt("pets", 0);
@@ -67,39 +82,14 @@ void LoadPetMemory() {
     if (rtc_wasSleeping > 0) {
         prefs_cfg.begin("pet_cfg", true);
         pet_emotion.SetEmotion(prefs_cfg.getUInt("emotion", 5));
-        bool is_full = prefs_cfg.getBool("is_full", false);
-        uint16_t remain = prefs_cfg.getUInt("full_rem", 0); // 【新增】读取剩余秒数
-        prefs_cfg.end();
 
-        // 【核心修正】拦截默认的 SetFull 行为，采用精准的 Restore 接口
-        if (is_full && remain > 0) {
-            pet_emotion.RestoreFullState(remain);
-        }
-        else {
-            pet_emotion.SetFull(false);
-        }
-        LOG_INFO("Restored state and precise timers from Flash memory.");
+        // 恢复精确的倒计时状态
+        pet_emotion.SetFullTimerMs(prefs_cfg.getInt("full_timer", 0));
+        pet_emotion.SetDecayTimerMs(prefs_cfg.getInt("decay_timer", 30000));
+        prefs_cfg.end();
+        LOG_INFO("Restored precision state from Flash memory.");
     }
 }
-
-void GoToDeepSleep() {
-    rtc_bootMs += millis();
-
-    // 掉电前保存即时状态（写入 Flash）
-    prefs_cfg.begin("pet_cfg", false);
-    prefs_cfg.putUInt("emotion", pet_emotion.GetEmotion());
-    prefs_cfg.putBool("is_full", pet_emotion.GetIsFull());
-
-    // 【核心修正】同步将确切的剩余秒数写入 Flash 记忆空间
-    prefs_cfg.putUInt("full_rem", pet_emotion.GetFullRemainSeconds());
-
-    prefs_cfg.end();
-
-    screen.Sleep();
-    esp_sleep_enable_ext0_wakeup((gpio_num_t)ENCODER_KEY_PIN, 0);
-    esp_deep_sleep_start();
-}
-
 // ==========================================
 // 异步网络请求
 // ==========================================
@@ -131,7 +121,6 @@ void FetchWeatherData() {
 void ResetTimersOnWakeup() {
     uint32_t now = millis();
     rtc_lastInteract = GetAbsoluteTimeMs();
-    last_emo_drop = now;
     last_auto_action = now;
     last_print = now;
 }
@@ -139,36 +128,35 @@ void ResetTimersOnWakeup() {
 // ==========================================
 // 串口指令解析系统
 // ==========================================
-void ProcessSerialDebug() {
+// 将返回类型改为 bool，仅表示是否捕获到有效交互
+bool ProcessSerialDebug() {
     static char serial_buf[64];
     static uint8_t buf_idx = 0;
+    bool activity_detected = false; // 新增状态标识，默认无交互
 
     while (Serial.available() > 0) {
         char c = Serial.read();
-
         if (c == '\n' || c == '\r') {
             serial_buf[buf_idx] = '\0';
-
             if (buf_idx > 0) {
-                rtc_lastInteract = GetAbsoluteTimeMs();
+                activity_detected = true; // 标记产生有效交互事件
 
                 // 【规范 3】即使在睡眠态，也必须且仅响应 setslp
                 if (strncmp(serial_buf, "setslp", 6) == 0) {
                     if (strstr(serial_buf, "true") != NULL && !system_sleeping) {
                         system_sleeping = true;
                         pet_emotion.SetSleep(true);
-                        screen.Sleep();                         // 【规范 1】清空屏幕
+                        screen.Sleep();
                         pet_motion.TriggerMotion(MOTION_NULL);
-                        pet_motion.ForceSleepPosture();         // 【规范 2】移至+80°
-                        delay(600); // 等待舵机机械响应
-                        Serial.printf("[%lu ms] Sleep Mode On\n", millis()); // 【规范 4】打印通知
+                        pet_motion.ForceSleepPosture();
+                        delay(600);
+                        Serial.printf("[%lu ms] Sleep Mode On\n", millis());
                     }
                     else if (strstr(serial_buf, "false") != NULL && system_sleeping) {
                         system_sleeping = false;
                         pet_emotion.SetSleep(false);
                         screen.Wakeup();
                         ResetTimersOnWakeup();
-                        // 【唤醒不回中立位】跳过 TriggerMotion
                         Serial.printf("[%lu ms] Sleep Mode Off\n", millis());
                     }
                 }
@@ -197,8 +185,10 @@ void ProcessSerialDebug() {
             serial_buf[buf_idx++] = c;
         }
     }
-}
 
+    // 【核心修复】：函数末尾必须确保返回状态，避免触发栈空间与寄存器未定义异常
+    return activity_detected;
+}
 // ==========================================
 // 系统初始化
 // ==========================================
@@ -214,13 +204,11 @@ void setup() {
 
     LoadPetMemory();
 
-    if (rtc_wasSleeping == 2) {
-        Serial.println("[Boot] Woke up from Light Sleep. Posture held."); // 光敏唤醒，不回中立位
-    }
-    else {
-        pet_motion.TriggerMotion(MOTION_NULL);
-        if (rtc_wasSleeping == 0) InitNetwork();
-    }
+    // 【刚需保留】DeepSleep 唤醒后 SRAM 清空，必须无条件重新初始化基带与网络栈
+    InitNetwork();
+
+    // 【状态收敛】无论是冷启动、30秒待机唤醒，还是低光照唤醒，统一强制回中立位
+    pet_motion.TriggerMotion(MOTION_NULL);
 
     ResetTimersOnWakeup();
     rtc_wasSleeping = 0;
@@ -233,10 +221,8 @@ void loop() {
     uint32_t current_abs_time = GetAbsoluteTimeMs();
     uint32_t now = millis();
 
-    // 1. 串口解析始终在后台监听唤醒信号
-    ProcessSerialDebug();
-
-    // 2. 交互按键检测
+    // 1. 采集子系统事件
+    bool serial_active = ProcessSerialDebug();
     InteractionEvent event = interaction.Update(system_sleeping);
 
     // ===============================================
@@ -255,6 +241,11 @@ void loop() {
         return;
     }
 
+    // 2. 统一的时基同步枢纽 (消除脏写)
+    if (serial_active || event != EVENT_NONE) {
+        rtc_lastInteract = current_abs_time;
+    }
+
     // ===============================================
     // 以下为系统清醒状态 (Active) 下的日常轮询
     // ===============================================
@@ -271,13 +262,21 @@ void loop() {
 
     if (event != EVENT_NONE) rtc_lastInteract = current_abs_time;
 
-    // [交互逻辑与 Flash 闭环]
+    // ===============================================
+        // [交互逻辑与 Flash 闭环] - 结合记忆算法 1 与 2
+        // ===============================================
     if (event == EVENT_PET_SUCCESS) {
-        uint32_t cooldown = 10000 - (total_pets / 5) * 1000;
-        if (cooldown < 2000 || cooldown > 10000) cooldown = 2000;
+
+        // 算法 2：多巴胺反馈衰减 (T_cd)
+        // 基础冷却 10000ms，每 5 次摸头减少 1000ms，硬性下限 2000ms
+        uint32_t cd_reduction = (total_pets / 5) * 1000;
+        // 防下溢 (Underflow) 设计：当减量超过或等于 8000 时，直接截断至下限
+        uint32_t cooldown = (cd_reduction >= 8000) ? 2000 : (10000 - cd_reduction);
 
         if (now - last_pet_time >= cooldown) {
             last_pet_time = now;
+
+            // 更新 Flash (NVS) 记忆
             total_pets++;
             prefs_mem.begin("pet_mem", false);
             prefs_mem.putUInt("pets", total_pets);
@@ -286,9 +285,13 @@ void loop() {
             Serial.println("Head Touch");
             pet_motion.TriggerMotion(MOTION_PLAY);
 
+            // 算法 1：情感上限阈值解锁 (E_max)
             uint8_t current_emo = pet_emotion.GetEmotion();
-            uint8_t max_emo = 10 + (total_pets / 10);
-            if (current_emo < (max_emo > 20 ? 20 : max_emo)) {
+            // 基础上限 10，每 10 次交互提升 1 点，绝对物理上限 20
+            uint8_t dynamic_max_emo = 10 + (total_pets / 10);
+            if (dynamic_max_emo > 20) dynamic_max_emo = 20;
+
+            if (current_emo < dynamic_max_emo) {
                 pet_emotion.SetEmotion(current_emo + 1);
             }
         }
@@ -301,59 +304,55 @@ void loop() {
         Serial.println("Feed");
         pet_emotion.Feed();
     }
-
     // [光敏低光照] 触发硬件睡眠
     if (pet_env.CheckSleepCondition(false)) {
         Serial.println("[Sys] Low Light Triggered. Deep Sleep.");
-        pet_motion.TriggerMotion(MOTION_NULL);
+        screen.Sleep();
         pet_motion.ForceSleepPosture(); // 移至+80°
         delay(600);
         rtc_wasSleeping = 2;
         GoToDeepSleep();
     }
 
-    // [时序 2] 心情衰减
-    if (!pet_emotion.GetIsFull() && (now - last_emo_drop >= 30000)) {
-        last_emo_drop = now;
-        uint8_t cur = pet_emotion.GetEmotion();
-        if (cur > 0) pet_emotion.SetEmotion(cur - 1);
-    }
-
-    // [时序 3] 自动动作
+    // ===============================================
+        // [时序 3] 自动动作 - 结合记忆算法 3
+        // ===============================================
     if (pet_motion.GetCurrentMotion() == MOTION_NULL && (now - last_auto_action >= 1000)) {
         last_auto_action = now;
-        float prob = 3.33f + (total_pets / 2) * 0.1f;
-        if (random(10000) < ((prob > 10.0f ? 10.0f : prob) * 100)) {
-            pet_motion.TriggerMotion(MOTION_IDLE);
+
+        // 算法 3：自主活跃度概率增益 (P_auto)
+        // 采用万分率整数域计算：基础概率 333 (3.33%)，每次交互增加 5 (0.05%)
+        uint32_t prob_threshold = 333 + (total_pets * 5);
+        // 上限阈值截断：最高 1000 (10.0%)
+        if (prob_threshold > 1000) prob_threshold = 1000;
+
+        // 随机事件生成器 (RNG) 命中判定
+        if (random(10000) < prob_threshold) {
+            // 引入选修设计状态机：判断是否疲惫
+            if (pet_emotion.GetEmotion() >= 5) {
+                pet_motion.TriggerMotion(MOTION_IDLE);
+            }
+            else {
+                pet_motion.TriggerMotion(MOTION_TIRE);
+            }
         }
     }
-
     // ===============================================
-        // [网络异步] 高频状态轮询与边沿检测重连机制
+        // [网络异步] 5秒定时轮询与断线自恢复状态机
         // ===============================================
     static uint32_t last_wifi_check = 0;
-    static bool last_wifi_state = false; // 用于存储上一状态，构建边沿触发器
 
-    // 将网卡状态轮询周期缩短至 5000ms (5秒)
     if (now - last_wifi_check >= 5000) {
         last_wifi_check = now;
-        bool current_wifi_state = (WiFi.status() == WL_CONNECTED);
 
-        // 1. 下降沿触发：检测到网络由连接变为断开
-        if (!current_wifi_state && last_wifi_state) {
-            Serial.println("[Net] Warning: WiFi Disconnected. Triggering explicit reconnect...");
-            WiFi.disconnect(); // 清理残余的 Socket 句柄与底层状态
-            WiFi.reconnect();  // 触发一次非阻塞的重新握手
-            last_wifi_state = false;
+        if (WiFi.status() != WL_CONNECTED) {
+            Serial.println("[Net] Status: Disconnected. Initiating reconnect sequence...");
+            // 采用 disconnect() 清理残留 Socket 句柄，随后重新请求基带关联
+            WiFi.disconnect();
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         }
-        // 2. 上升沿触发：检测到网络由断开变为连接
-        else if (current_wifi_state && !last_wifi_state) {
-            Serial.println("[Net] Info: WiFi Reconnected successfully.");
-            last_wifi_state = true;
-        }
-
-        // 3. 稳态执行：仅在网络处于稳定连接态时，执行气象数据的 10 分钟 (600000ms) 周期刷新
-        if (current_wifi_state) {
+        else {
+            // 网络处于稳态，执行 HTTP 气象数据获取 (周期 10 分钟)
             if (last_weather_update == 0 || (current_abs_time - last_weather_update >= 600000)) {
                 FetchWeatherData();
                 last_weather_update = current_abs_time;
