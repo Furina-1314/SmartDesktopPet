@@ -4,6 +4,9 @@
 
 #include <Arduino.h>
 
+// 声明全局绝对时间函数（在.ino中实现）
+extern uint32_t GetAbsoluteTimeMs();
+
 // 全局状态与事件枚举
 enum InteractionEvent {
     EVENT_NONE,
@@ -20,11 +23,12 @@ enum PetMotion {
     MOTION_FOWD = 4
 };
 
-// 严谨的日志输出宏，自动附加系统开机以来的绝对毫秒数
-#define LOG_INFO(msg) Serial.printf("[%lu ms] %s\n", millis(), msg)
+// 严谨的日志输出宏，统一调用包含睡眠补偿的 GetAbsoluteTimeMs()
+#define LOG_INFO(msg) Serial.printf("[%lu ms] %s\n", GetAbsoluteTimeMs(), msg)
 #define LOG_MOTION(motion_id) do { \
     if ((motion_id) != 0) { \
-        Serial.printf("[%lu ms] Motion+%d\n", millis(), (motion_id)); \
+        Serial.printf("[%lu ms] Motion+%d\n", GetAbsoluteTimeMs(), (motion_id)); \
     } \
 } while(0)
+
 #endif // __CORE_SYS_H__

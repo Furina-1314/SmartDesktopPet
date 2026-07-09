@@ -3,6 +3,7 @@
 #include "ArduinoJson.h"
 #include <Preferences.h>
 #include <esp_sleep.h>
+#include <sys/time.h> // 【新增】用于获取包含 Deep Sleep 的绝对系统时间
 
 #include "core_sys.h"
 #include "bsp_oled.h"
@@ -13,7 +14,7 @@
 
 // ==== 基础配置 ====
 const char* WIFI_SSID = "fzl";
-const char* WIFI_PASSWORD = "myserenades";
+const char* WIFI_PASSWORD = "MySerenades";
 const uint32_t STANDBY_TIMEOUT_MS = 30000;
 const uint32_t PRINT_INTERVAL_MS = 5000;
 
@@ -46,18 +47,21 @@ uint32_t last_weather_update = 0;
 uint32_t last_print = 0;
 
 // ==== RTC 连续性追踪变量 ====
-RTC_DATA_ATTR uint32_t rtc_bootMs = 0;
 RTC_DATA_ATTR uint32_t rtc_lastInteract = 0;
 RTC_DATA_ATTR uint8_t rtc_wasSleeping = 0;   // 0:冷启动, 1:待机30s唤醒, 2:光敏睡眠唤醒
 RTC_DATA_ATTR float current_temperature = -999.0;
 RTC_DATA_ATTR int current_weather_code = -1;
 
-uint32_t GetAbsoluteTimeMs() { return rtc_bootMs + millis(); }
+// 【重写】获取自首次上电以来的绝对毫秒数（无缝跨越 Deep Sleep）
+uint32_t GetAbsoluteTimeMs() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint32_t)(tv.tv_sec * 1000ULL + tv.tv_usec / 1000ULL);
+}
 
 // ==========================================
 // 记忆系统与硬件级待机 (Deep-Sleep)
 void GoToDeepSleep() {
-    rtc_bootMs += millis();
     prefs_cfg.begin("pet_cfg", false);
     prefs_cfg.putUInt("emotion", pet_emotion.GetEmotion());
     prefs_cfg.putBool("is_full", pet_emotion.GetIsFull());
@@ -150,14 +154,14 @@ bool ProcessSerialDebug() {
                         pet_motion.TriggerMotion(MOTION_NULL);
                         pet_motion.ForceSleepPosture();
                         delay(600);
-                        Serial.printf("[%lu ms] Sleep Mode On\n", millis());
+                        Serial.printf("[%lu ms] Sleep Mode On\n", GetAbsoluteTimeMs());
                     }
                     else if (strstr(serial_buf, "false") != NULL && system_sleeping) {
                         system_sleeping = false;
                         pet_emotion.SetSleep(false);
                         screen.Wakeup();
                         ResetTimersOnWakeup();
-                        Serial.printf("[%lu ms] Sleep Mode Off\n", millis());
+                        Serial.printf("[%lu ms] Sleep Mode Off\n", GetAbsoluteTimeMs());
                     }
                 }
                 // 【规范 3】如果在睡眠态，静默抛弃除此之外的所有指令
@@ -177,6 +181,7 @@ bool ProcessSerialDebug() {
                 else if (strncmp(serial_buf, "setmot", 6) == 0) {
                     int mot;
                     if (sscanf(serial_buf, "setmot %d", &mot) == 1) pet_motion.TriggerMotion((PetMotion)mot);
+                    LOG_MOTION(mot);
                 }
                 buf_idx = 0;
             }
@@ -193,6 +198,15 @@ bool ProcessSerialDebug() {
 // 系统初始化
 // ==========================================
 void setup() {
+
+    // 测试用
+    // 物理层擦除命令
+    //prefs_mem.begin("pet_mem", false);
+    //prefs_mem.clear(); // 彻底擦除该命名空间下的所有键值节点
+    //prefs_mem.end();
+    //
+
+
     Serial.begin(115200);
     delay(500);
 
@@ -234,7 +248,7 @@ void loop() {
             pet_emotion.SetSleep(false);
             screen.Wakeup();
             ResetTimersOnWakeup();
-            Serial.printf("[%lu ms] Woke up from soft sleep by Button.\n", now);
+            Serial.printf("[%lu ms] Woke up from soft sleep by Button.\n", current_abs_time);
         }
         // 【核心机制】：如果没被唤醒，直接 return！
         // 这一刀彻底切断了吃饱计时、心情掉落、自动动作以及打印，完美满足 3, 4, 5, 6 规范。
@@ -282,7 +296,7 @@ void loop() {
             prefs_mem.putUInt("pets", total_pets);
             prefs_mem.end();
 
-            Serial.println("Head Touch");
+            Serial.printf("[%lu ms] Head Touch\n", current_abs_time);
             pet_motion.TriggerMotion(MOTION_PLAY);
 
             // 算法 1：情感上限阈值解锁 (E_max)
@@ -301,12 +315,12 @@ void loop() {
         prefs_mem.begin("pet_mem", false);
         prefs_mem.putUInt("feeds", total_feeds);
         prefs_mem.end();
-        Serial.println("Feed");
+        Serial.printf("[%lu ms] Feed\n", current_abs_time);
         pet_emotion.Feed();
     }
     // [光敏低光照] 触发硬件睡眠
     if (pet_env.CheckSleepCondition(false)) {
-        Serial.println("[Sys] Low Light Triggered. Deep Sleep.");
+        Serial.printf("[%lu ms] [Sys] Low Light Triggered. Deep Sleep.\n", current_abs_time);
         screen.Sleep();
         pet_motion.ForceSleepPosture(); // 移至+80°
         delay(600);
@@ -346,7 +360,7 @@ void loop() {
         last_wifi_check = now;
 
         if (WiFi.status() != WL_CONNECTED) {
-            Serial.println("[Net] Status: Disconnected. Initiating reconnect sequence...");
+            Serial.printf("[%lu ms] [Net] Status: Disconnected. Initiating reconnect sequence...\n", current_abs_time);
             // 采用 disconnect() 清理残留 Socket 句柄，随后重新请求基带关联
             WiFi.disconnect();
             WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -365,7 +379,7 @@ void loop() {
         last_print = now;
         char log_buf[128];
         snprintf(log_buf, sizeof(log_buf), "[%lu ms] EMOTION:%d %s ACTION:%d | Head:%d Feed:%d",
-            now, pet_emotion.GetEmotion(),
+            current_abs_time, pet_emotion.GetEmotion(),
             pet_emotion.GetIsFull() ? "FULL" : "HUNGRY",
             pet_motion.GetCurrentMotion(), total_pets, total_feeds);
         Serial.println(log_buf);

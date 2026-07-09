@@ -13,7 +13,7 @@ private:
     int32_t  decay_timer_ms;
     int32_t  full_timer_ms;
 
-    static const int32_t DECAY_INTERVAL_MS = 30000;
+    static const int32_t DECAY_INTERVAL_MS = 25000;
     static const int32_t FULL_DURATION_MS = 120000;
     static const uint8_t MAX_EMOTION = 20;
     static const uint8_t MIN_EMOTION = 1;

@@ -12,10 +12,10 @@ private:
     ButtonSystem head_btn;
     EncoderSystem encoder;
 
-    // 按键防抖与冷却
-    uint32_t last_pet_time;
-    static const uint32_t PET_COOLDOWN_MS = 10000;
-
+    // ⛔ 移除：将冷却逻辑彻底移交至主循环的动态多巴胺系统
+    // uint32_t last_pet_time;
+    // static const uint32_t PET_COOLDOWN_MS = 10000;
+        
     // 编码器积分与超时系统
     int32_t accumulated_steps;
     uint32_t last_rotate_time;

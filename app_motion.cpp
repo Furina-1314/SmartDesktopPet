@@ -67,18 +67,26 @@ void MotionController::ExecuteFrame(uint32_t current_time) {
     case MOTION_TIRE: // 2次，一侧静止，另一侧30°~50°，持续3秒 (750ms/帧)
         if (current_time - last_frame_time >= 750) {
             last_frame_time = current_time;
-            if (current_frame % 2 == 0) servos.SetArms(90, 120);
-            else servos.SetArms(90, 140);
-            current_frame++;
-            if (current_frame >= 4) TriggerMotion(MOTION_NULL);
+
+            // 将执行域与判定域物理隔离
+            if (current_frame < 4) {
+                if (current_frame % 2 == 0) servos.SetArms(90, 120);
+                else servos.SetArms(90, 140);
+                current_frame++;
+            }
+            else {
+                // 只有当 current_frame 已经达到 4，且又经历了一个 750ms 周期后，
+                // 才执行状态回收。这保证了最后一帧能够驻留完整的设定时间。
+                TriggerMotion(MOTION_NULL);
+            }
         }
         break;
 
     case MOTION_FOWD: // 3次，幅度-70°~0°，反向摆动，持续4秒 (666ms/帧)
         if (current_time - last_frame_time >= 666) {
             last_frame_time = current_time;
-            if (current_frame % 2 == 0) servos.SetArms(20, 90);
-            else servos.SetArms(90, 20);
+            if (current_frame % 2 == 0) servos.SetArms(20, 160);
+            else servos.SetArms(90, 90);
             current_frame++;
             if (current_frame >= 6) TriggerMotion(MOTION_NULL);
         }

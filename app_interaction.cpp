@@ -4,7 +4,6 @@ void InteractionManager::Init(uint8_t btn_pin, uint8_t enc_a_pin, uint8_t enc_b_
     head_btn.Init(btn_pin);
     encoder.Init(enc_a_pin, enc_b_pin);
 
-    last_pet_time = 0;
     accumulated_steps = 0;
     last_rotate_time = 0;
 }
@@ -59,11 +58,9 @@ InteractionEvent InteractionManager::Update(bool is_sleeping) {
             return EVENT_WAKEUP;
         }
         else {
-            if (current_time < last_pet_time || (current_time - last_pet_time) >= PET_COOLDOWN_MS) {
-                last_pet_time = current_time;
-                LOG_INFO("Head Touch");
-                return EVENT_PET_SUCCESS;
-            }
+            // ✅ 彻底剥离时钟比对与冗余打印
+                        // 物理层检测到上升沿/下降沿后，无条件投递事件，冷却判定全权由主引擎接管
+            return EVENT_PET_SUCCESS;
         }
     }
 
